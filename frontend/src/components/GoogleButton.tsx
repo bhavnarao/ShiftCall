@@ -29,12 +29,21 @@ interface Props {
   onError?: (msg: string) => void;
 }
 
+function isDevHost() {
+  if (typeof window === 'undefined') return false;
+  const h = window.location.hostname;
+  return h === 'localhost' || h === '127.0.0.1' || h.endsWith('.local');
+}
+
 export function GoogleButton({ label = 'Continue with Google', onError }: Props) {
   const { signInWithGoogle, mode } = useAuth();
   const [loading, setLoading] = useState(false);
 
-  // In local-demo mode (no Supabase env vars), OAuth literally cannot work,
-  // so we render the button as disabled with a helpful hint instead of hiding it.
+  // On a deployed host, if Supabase isn't configured we just hide the button
+  // entirely — never show a dev-flavored "configure env vars" message to visitors.
+  // On localhost we leave it visible so devs see what's missing.
+  if (mode !== 'cloud' && !isDevHost()) return null;
+
   const disabled = mode !== 'cloud' || loading;
 
   const handleClick = async () => {
