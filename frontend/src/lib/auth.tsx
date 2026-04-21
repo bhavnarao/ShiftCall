@@ -61,65 +61,92 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   // ── Bootstrap session on mount ─────────────────────────────
+  // CRITICAL: the onAuthStateChange listener has to be registered
+  // unconditionally and BEFORE getSession() resolves. Otherwise the
+  // SIGNED_IN event fired when Supabase parses the OAuth tokens out of
+  // window.location.hash arrives before any listener is attached, and
+  // the app gets stuck on /login even though the session is valid.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      if (SUPABASE_MODE === 'cloud' && supabase) {
-        const { data } = await supabase.auth.getSession();
-        if (!data.session) { if (!cancelled) setLoading(false); return; }
 
-        const u = data.session.user;
-        const { data: profile } = await supabase.from('profiles').select('*').eq('id', u.id).maybeSingle();
+    if (SUPABASE_MODE !== 'cloud' || !supabase) {
+      // LOCAL DEMO MODE
+      const sid = readLocalSession();
+      if (sid) {
+        const record = readLocalUsers().find(u => u.id === sid);
+        if (record) setUser(toAppUser(record));
+      }
+      setLoading(false);
+      return;
+    }
+
+    // Loads (or creates if missing) the profile row for a Supabase user
+    // and pushes it into local state.
+    const hydrate = async (su: any) => {
+      if (!supabase) return;
+      let { data: p } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', su.id)
+        .maybeSingle();
+
+      // Fresh Google OAuth user: no profile row yet. Create one.
+      if (!p) {
+        const fallbackName =
+          (su.user_metadata?.full_name as string) ||
+          (su.user_metadata?.name as string) ||
+          (su.email ? su.email.split('@')[0] : 'My Workspace');
+        const { data: created } = await supabase
+          .from('profiles')
+          .upsert({
+            id: su.id,
+            email: su.email,
+            workspace_name: fallbackName,
+            onboarded: false,
+          })
+          .select()
+          .maybeSingle();
+        p = created || null;
+      }
+
+      if (cancelled) return;
+      setUser({
+        id: su.id,
+        email: su.email || '',
+        workspaceName: p?.workspace_name || 'My Workspace',
+        createdAt: su.created_at,
+        onboarded: p?.onboarded ?? false,
+      });
+    };
+
+    // 1. Register the listener FIRST so we don't miss the SIGNED_IN event.
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_evt, session) => {
+      if (!session) {
         if (!cancelled) {
-          setUser({
-            id: u.id,
-            email: u.email || '',
-            workspaceName: profile?.workspace_name || 'My Workspace',
-            createdAt: u.created_at,
-            onboarded: profile?.onboarded ?? false,
-          });
+          setUser(null);
           setLoading(false);
         }
-
-        supabase.auth.onAuthStateChange(async (_evt, session) => {
-          if (!session || !supabase) { setUser(null); return; }
-          const su = session.user;
-          let { data: p } = await supabase.from('profiles').select('*').eq('id', su.id).maybeSingle();
-
-          // First time we've seen this user (e.g. fresh Google OAuth). Create profile row.
-          if (!p) {
-            const fallbackName =
-              (su.user_metadata?.full_name as string) ||
-              (su.user_metadata?.name as string) ||
-              (su.email ? su.email.split('@')[0] : 'My Workspace');
-            const { data: created } = await supabase.from('profiles').upsert({
-              id: su.id,
-              email: su.email,
-              workspace_name: fallbackName,
-              onboarded: false,
-            }).select().maybeSingle();
-            p = created || null;
-          }
-
-          setUser({
-            id: su.id,
-            email: su.email || '',
-            workspaceName: p?.workspace_name || 'My Workspace',
-            createdAt: su.created_at,
-            onboarded: p?.onboarded ?? false,
-          });
-        });
-      } else {
-        // LOCAL DEMO MODE
-        const sid = readLocalSession();
-        if (sid) {
-          const record = readLocalUsers().find(u => u.id === sid);
-          if (record) setUser(toAppUser(record));
-        }
-        if (!cancelled) setLoading(false);
+        return;
       }
+      await hydrate(session.user);
+      if (!cancelled) setLoading(false);
+    });
+
+    // 2. THEN check for an existing session (covers the page-refresh case
+    //    where we already have a session but no auth event fires).
+    (async () => {
+      if (!supabase) return;
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        await hydrate(data.session.user);
+      }
+      if (!cancelled) setLoading(false);
     })();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+      listener?.subscription?.unsubscribe();
+    };
   }, []);
 
   // ── Sign up ────────────────────────────────────────────────

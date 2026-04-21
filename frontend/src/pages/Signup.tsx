@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { AuthLayout } from '../components/AuthLayout';
@@ -6,13 +6,21 @@ import { GoogleButton } from '../components/GoogleButton';
 import { Loader2 } from 'lucide-react';
 
 export default function Signup() {
-  const { signUp } = useAuth();
+  const { signUp, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [workspaceName, setWorkspaceName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // If we land here already authenticated (e.g. after Google OAuth callback),
+  // bounce to the right place instead of showing the signup form.
+  useEffect(() => {
+    if (!authLoading && user) {
+      navigate(user.onboarded ? '/dashboard' : '/onboarding', { replace: true });
+    }
+  }, [authLoading, user, navigate]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
