@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+anthropic
+pinecone
+openai
+mistralai
+python-dotenv
+pydantic
+websockets
