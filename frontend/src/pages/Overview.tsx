@@ -8,6 +8,7 @@ import {
 import { useAuth } from '../lib/auth';
 import { useKeys } from '../lib/keys';
 import { useCalls } from '../lib/calls';
+import { useTrial } from '../lib/trial';
 import { SUPABASE_MODE } from '../lib/supabase';
 
 // Page. Only ever rendered for authenticated users (route is protected).
@@ -23,6 +24,10 @@ function Dashboard() {
   const { user } = useAuth();
   const { keys, hasAllRequired, missing } = useKeys();
   const { calls, loading } = useCalls();
+  const { status: trial } = useTrial();
+  // A trial-active user counts as "ready to call" even without their own keys
+  const onTrial = trial.trialActive && trial.remaining > 0;
+  const canCall = hasAllRequired || onTrial;
 
   // Derived metrics from the user's own calls
   const metrics = useMemo(() => {
@@ -69,13 +74,29 @@ function Dashboard() {
           <p className="dash-sub">
             {hasAllRequired
               ? 'Your AI agent is live. Launch a call and watch Aria detect the Gratitude Window in real time.'
-              : 'You\'re one step away from going live. Finish setup to start detecting Gratitude Windows.'}
+              : onTrial
+                ? `You have ${trial.remaining} free call${trial.remaining === 1 ? '' : 's'} left. Add your own API keys anytime in Settings to keep going.`
+                : 'You\'re one step away from going live. Finish setup to start detecting Gratitude Windows.'}
           </p>
         </div>
         <div className="dash-status-row">
-          <span className={`dash-pill ${hasAllRequired ? 'is-ok' : 'is-warn'}`}>
-            <span className="dash-dot" /> {hasAllRequired ? 'Activated' : `${missing.length} key${missing.length === 1 ? '' : 's'} missing`}
-          </span>
+          {hasAllRequired ? (
+            <span className="dash-pill is-ok">
+              <span className="dash-dot" /> Activated
+            </span>
+          ) : onTrial ? (
+            <span className="dash-pill is-trial">
+              <span className="dash-dot" /> Free trial · {trial.remaining}/{trial.limit} calls left
+            </span>
+          ) : trial.trialActive && trial.remaining === 0 ? (
+            <span className="dash-pill is-warn">
+              <span className="dash-dot" /> Trial used. Add your keys to continue
+            </span>
+          ) : (
+            <span className="dash-pill is-warn">
+              <span className="dash-dot" /> {missing.length} key{missing.length === 1 ? '' : 's'} missing
+            </span>
+          )}
           <span className="dash-pill is-muted">
             {SUPABASE_MODE === 'cloud' ? 'Cloud workspace' : 'Local demo mode'}
           </span>
@@ -86,13 +107,17 @@ function Dashboard() {
       <div className="dash-actions">
         <button
           className="dash-action dash-action-primary"
-          onClick={() => navigate(hasAllRequired ? '/live-call' : '/settings')}
+          onClick={() => navigate(canCall ? '/live-call' : '/settings')}
         >
           <div className="dash-action-icon"><PhoneCall size={18} /></div>
           <div className="dash-action-body">
-            <p className="dash-action-title">{hasAllRequired ? 'Start a live call' : 'Add your API keys'}</p>
+            <p className="dash-action-title">{canCall ? 'Start a live call' : 'Add your API keys'}</p>
             <p className="dash-action-sub">
-              {hasAllRequired ? 'Pick a customer, run a simulation' : `Configure ${missing.join(', ')}`}
+              {hasAllRequired
+                ? 'Pick a customer, run a simulation'
+                : onTrial
+                  ? `${trial.remaining} free call${trial.remaining === 1 ? '' : 's'} on the house`
+                  : `Configure ${missing.join(', ')}`}
             </p>
           </div>
           <ArrowRight size={16} className="dash-action-arrow" />
@@ -151,10 +176,10 @@ function Dashboard() {
               <p className="dash-empty-title">No calls yet</p>
               <p className="dash-empty-sub">Run your first simulation to populate this list.</p>
               <button
-                onClick={() => navigate(hasAllRequired ? '/live-call' : '/settings')}
+                onClick={() => navigate(canCall ? '/live-call' : '/settings')}
                 className="dash-empty-cta"
               >
-                <Plus size={14} /> {hasAllRequired ? 'Start your first call' : 'Add keys to start'}
+                <Plus size={14} /> {canCall ? 'Start your first call' : 'Add keys to start'}
               </button>
             </div>
           ) : (
@@ -239,7 +264,7 @@ function Dashboard() {
             <ul className="dash-service-list">
               <ServiceRow label="Vapi (voice orchestration)" present={!!keys.vapi} />
               <ServiceRow label="Deepgram (transcription)" present={!!keys.deepgram} />
-              <ServiceRow label="Anthropic Claude (intelligence)" present={!!keys.anthropic} />
+              <ServiceRow label="xAI Grok (intelligence)" present={!!keys.xai} />
             </ul>
             <button className="dash-card-link" onClick={() => navigate('/settings')}>
               Manage in settings <ChevronRight size={12} />

@@ -23,10 +23,10 @@ const KEY_META: Record<KeyName, { name: string; placeholder: string; helpUrl: st
     icon: <Mic size={16} />,
     subtitle: 'Real-time speech-to-text on your microphone.',
   },
-  anthropic: {
-    name: 'Anthropic',
-    placeholder: 'sk-ant-…',
-    helpUrl: 'https://console.anthropic.com/settings/keys',
+  xai: {
+    name: 'xAI Grok',
+    placeholder: 'xai-…',
+    helpUrl: 'https://console.x.ai/',
     icon: <Brain size={16} />,
     subtitle: 'Sentiment streaming, Gratitude Window Detection, post-call analysis.',
   },
@@ -38,12 +38,12 @@ export default function Settings() {
   const { calls, clearAll: clearCalls } = useCalls();
   const navigate = useNavigate();
 
-  const [reveal, setReveal] = useState<Record<KeyName, boolean>>({ vapi: false, deepgram: false, anthropic: false });
+  const [reveal, setReveal] = useState<Record<KeyName, boolean>>({ vapi: false, deepgram: false, xai: false });
   const [drafts, setDrafts] = useState<Record<KeyName, string>>({
-    vapi: keys.vapi, deepgram: keys.deepgram, anthropic: keys.anthropic,
+    vapi: keys.vapi, deepgram: keys.deepgram, xai: keys.xai,
   });
   const [validations, setValidations] = useState<Record<KeyName, { state: 'idle' | 'checking' | 'ok' | 'fail'; msg?: string }>>({
-    vapi: { state: 'idle' }, deepgram: { state: 'idle' }, anthropic: { state: 'idle' },
+    vapi: { state: 'idle' }, deepgram: { state: 'idle' }, xai: { state: 'idle' },
   });
 
   const [workspaceDraft, setWorkspaceDraft] = useState(user?.workspaceName || '');
@@ -133,8 +133,8 @@ export default function Settings() {
               onClick={() => {
                 if (confirm('Remove all API keys from this browser?')) {
                   clearAll();
-                  setDrafts({ vapi: '', deepgram: '', anthropic: '' });
-                  setValidations({ vapi: { state: 'idle' }, deepgram: { state: 'idle' }, anthropic: { state: 'idle' } });
+                  setDrafts({ vapi: '', deepgram: '', xai: '' });
+                  setValidations({ vapi: { state: 'idle' }, deepgram: { state: 'idle' }, xai: { state: 'idle' } });
                 }
               }}
             >
@@ -143,7 +143,7 @@ export default function Settings() {
           </div>
 
           <div className="space-y-3">
-            {(['vapi', 'deepgram', 'anthropic'] as KeyName[]).map((k) => {
+            {(['vapi', 'deepgram', 'xai'] as KeyName[]).map((k) => {
               const meta = KEY_META[k];
               const v = validations[k];
               return (

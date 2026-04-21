@@ -12,8 +12,10 @@ from intelligence import (
 )
 from database import get_customer_profile
 from fastapi.responses import StreamingResponse
+from trial import router as trial_router
 
 app = FastAPI(title="ShiftCall API")
+app.include_router(trial_router)
 
 # CORS_ORIGINS env var: comma-separated list of allowed frontend origins.
 # In dev we leave it open; in production, set it to your Vercel URL(s).
@@ -26,7 +28,7 @@ app.add_middleware(
     allow_origins=_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*", "X-Anthropic-Key"],
+    allow_headers=["*", "X-XAI-Key"],
 )
 
 
@@ -59,13 +61,13 @@ async def root():
 @app.post("/score-contacts")
 async def score_contacts(
     request: ContactRequest,
-    x_anthropic_key: Optional[str] = Header(default=None, alias="X-Anthropic-Key"),
+    x_xai_key: Optional[str] = Header(default=None, alias="X-XAI-Key"),
 ):
     scored_contacts = []
     for cid in request.customer_ids:
         profile = get_customer_profile(cid)
         if profile:
-            score_data = get_receptivity_score(profile, api_key=x_anthropic_key)
+            score_data = get_receptivity_score(profile, api_key=x_xai_key)
             scored_contacts.append({
                 "id": cid,
                 "name": profile["name"],
@@ -82,20 +84,21 @@ async def score_contacts(
 @app.post("/detect-pivot")
 async def detect_pivot_endpoint(
     request: PivotRequest,
-    x_anthropic_key: Optional[str] = Header(default=None, alias="X-Anthropic-Key"),
+    x_xai_key: Optional[str] = Header(default=None, alias="X-XAI-Key"),
 ):
     profile = get_customer_profile(request.customer_id) if request.customer_id else None
-    return detect_pivot(request.transcript, profile, api_key=x_anthropic_key)
+    return detect_pivot(request.transcript, profile, api_key=x_xai_key)
 
 
 @app.post("/sentiment-stream")
 async def sentiment_stream_endpoint(
     request: SentimentRequest,
-    x_anthropic_key: Optional[str] = Header(default=None, alias="X-Anthropic-Key"),
+    x_xai_key: Optional[str] = Header(default=None, alias="X-XAI-Key"),
 ):
+    """Stream sentiment+tone JSON tokens from xAI Grok as they arrive.
+    Per-request header takes precedence; falls back to server XAI_API_KEY."""
     profile = get_customer_profile(request.customer_id) if request.customer_id else None
-    # Resolve key: per-request header preferred, fall back to env var
-    api_key = x_anthropic_key or os.getenv("ANTHROPIC_API_KEY")
+    api_key = x_xai_key or os.getenv("XAI_API_KEY")
 
     async def generate():
         profile_blob = (
@@ -103,24 +106,30 @@ async def sentiment_stream_endpoint(
             if profile
             else "Unknown caller. Infer tone from the words alone. Do not assume a specific name, plan, or issue."
         )
-        prompt = f"""
-        Customer profile: {profile_blob}
-        Full conversation so far: {json.dumps(request.history)}
-        The customer just said: '{request.text}'
-        Return JSON only, no other text: {{sentiment: <number from -1.0 to 1.0>, tone: <one of: Frustrated|Tense|Neutral|Explaining|Relieved|Warm|Grateful>}}
-        """
+        prompt = (
+            f"Customer profile: {profile_blob}\n"
+            f"Full conversation so far: {json.dumps(request.history)}\n"
+            f"The customer just said: '{request.text}'\n"
+            'Return JSON only, no other text: {"sentiment": <number from -1.0 to 1.0>, '
+            '"tone": <one of: Frustrated|Tense|Neutral|Explaining|Relieved|Warm|Grateful>}'
+        )
 
-        from anthropic import AsyncAnthropic
-        async_client = AsyncAnthropic(api_key=api_key)
+        from openai import AsyncOpenAI
+        async_client = AsyncOpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
 
-        async with async_client.messages.stream(
-            model="claude-3-5-sonnet-20241022",
+        stream = await async_client.chat.completions.create(
+            model=os.getenv("XAI_MODEL", "grok-2-latest"),
+            messages=[
+                {"role": "system", "content": "You are a real-time sentiment analyzer for a telecom support call. Return only a JSON object, nothing else."},
+                {"role": "user", "content": prompt},
+            ],
             max_tokens=1024,
-            system="You are a real-time sentiment analyzer for a telecom support call. Return only a JSON object, nothing else.",
-            messages=[{"role": "user", "content": prompt}],
-        ) as stream:
-            async for text in stream.text_stream:
-                yield text
+            stream=True,
+        )
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if delta:
+                yield delta
 
     return StreamingResponse(generate(), media_type="text/plain")
 
@@ -135,9 +144,9 @@ async def call_stream(websocket: WebSocket):
 @app.post("/analyze-call")
 async def analyze_call_endpoint(
     request: CallAnalysisRequest,
-    x_anthropic_key: Optional[str] = Header(default=None, alias="X-Anthropic-Key"),
+    x_xai_key: Optional[str] = Header(default=None, alias="X-XAI-Key"),
 ):
-    return analyze_call(request.transcript, api_key=x_anthropic_key)
+    return analyze_call(request.transcript, api_key=x_xai_key)
 
 
 if __name__ == "__main__":

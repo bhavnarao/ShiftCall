@@ -49,11 +49,27 @@ Verify on GitHub: open the repo, search for `.env` - **it must not appear**. The
 
 | Key | Value | Required? |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | your Claude key (fallback) | recommended |
+| `XAI_API_KEY` | your xAI Grok key (`xai-...`) - server-side fallback used by trial users | required |
+| `XAI_MODEL` | `grok-2-latest` (or your preferred Grok model) | optional |
+| `SUPABASE_URL` | `https://YOURPROJECT.supabase.co` | required for trial |
+| `SUPABASE_ANON_KEY` | same anon key as the frontend | required for trial |
+| `SUPABASE_SERVICE_ROLE_KEY` | from Supabase dashboard -> Settings -> API -> service_role | required for trial |
+| `VAPI_TRIAL_PUBLIC_KEY` | your Vapi public key (browser-safe) | required for trial |
+| `DEEPGRAM_TRIAL_KEY` | your Deepgram master key (used to mint scoped session tokens) | required for trial |
+| `DEEPGRAM_TOKEN_TTL_SEC` | `3600` (default) | optional |
 | `PINECONE_API_KEY` | your Pinecone key | optional |
 | `MISTRAL_API_KEY` | your Mistral key | optional |
-| `OPENAI_API_KEY` | your OpenAI key | optional |
 | `CORS_ORIGINS` | leave blank for now (will fill after Vercel) | required later |
+
+### About the trial keys
+
+Free-trial users (3 calls per signup) get these server-supplied keys instead of having
+to paste their own. Cost exposure per trial call: roughly $0.20 to $0.40 split across
+Vapi voice minutes, Deepgram transcription, and xAI tokens. Set monthly spend caps
+on each provider's dashboard before going live.
+
+The `DEEPGRAM_TRIAL_KEY` is your **master** key. It never reaches the browser. The
+backend uses it to mint a fresh, scoped, 1-hour Deepgram token per trial session.
 
 5. When the build finishes, copy the URL Render assigns you, e.g. `https://shiftcall-api.onrender.com`. Hit it in a browser - you should see `{"status":"ok","message":"ShiftCall AI Intelligence Layer is active"}`.
 
@@ -129,8 +145,10 @@ Open your OAuth 2.0 Client ID -> **Edit**:
 - **Authorized redirect URIs**: leave the existing Supabase callback unchanged
   (`https://zhmbtzyeyjpvbcuprhbr.supabase.co/auth/v1/callback`)
 
-### Run the SQL migration (only if you haven't yet)
-Supabase -> **SQL Editor** -> New query -> paste contents of `supabase/migrations/001_init.sql` -> Run.
+### Run the SQL migrations (only if you haven't yet)
+Supabase -> **SQL Editor** -> New query, then in order:
+1. Paste `supabase/migrations/001_init.sql` -> Run.
+2. Paste `supabase/migrations/002_trial.sql` -> Run. (adds the trial counters)
 
 ---
 
@@ -138,9 +156,11 @@ Supabase -> **SQL Editor** -> New query -> paste contents of `supabase/migration
 
 1. Open `https://shiftcall.vercel.app`
 2. Click **Continue with Google** -> Google account picker -> back to your app.
-3. Onboarding wizard appears. Paste your Vapi public key, Deepgram key, Anthropic key.
+3. Onboarding wizard appears. Either:
+   - Click **Start 3 free calls** to use the platform's shared keys (recommended for demo visitors), or
+   - Paste your own Vapi public key, Deepgram key, and xAI Grok key for unlimited usage.
 4. Land on the dashboard. Click **Live Call**, set up a persona, click **Start Call**.
-5. Talk to Aria. Sentiment should stream in real time. Hang up - post-call summary should appear.
+5. Talk to Aria. Sentiment should stream in real time. Hang up - post-call summary should appear. If you used the trial path, the counter on the dashboard ticks down to `2/3 calls left`.
 
 If anything breaks, see Troubleshooting below.
 
@@ -173,4 +193,5 @@ Anything you've shared in chat (Google Client Secret, Supabase keys) should be r
 
 - **Google OAuth Client Secret**: Google Cloud Console -> your OAuth client -> **Reset Secret** -> paste new value into Supabase.
 - **Supabase anon key**: Settings -> API -> "Generate new anon key" -> update everywhere.
-- **Anthropic / Vapi / Deepgram keys**: rotate from each provider's dashboard.
+- **xAI / Vapi / Deepgram keys**: rotate from each provider's dashboard.
+- **Supabase service role key**: Settings -> API -> "Generate new service_role key" -> update on Render.

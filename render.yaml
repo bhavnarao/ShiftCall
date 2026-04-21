@@ -11,7 +11,11 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       # Set these in the Render dashboard (don't commit secrets):
-      #   ANTHROPIC_API_KEY  - fallback Claude key (per-user keys override)
+      #   XAI_API_KEY        - fallback xAI Grok key (per-user keys override)
+      #   XAI_MODEL          - optional, defaults to grok-2-latest
+      #   VAPI_TRIAL_PUBLIC_KEY - public key used for free-trial calls
+      #   DEEPGRAM_TRIAL_KEY    - master Deepgram key, used to mint short-lived
+      #                            scoped tokens for trial sessions
       #   PINECONE_API_KEY   - optional, app degrades gracefully without it
       #   MISTRAL_API_KEY    - optional
       #   OPENAI_API_KEY     - optional

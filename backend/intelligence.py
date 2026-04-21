@@ -1,31 +1,71 @@
+"""
+ShiftCall AI intelligence layer (xAI Grok).
+
+We use xAI's OpenAI-compatible API via the `openai` SDK. The frontend sends
+each user's xAI key via the `X-XAI-Key` header; endpoints in main.py extract
+that and pass it down here as `api_key`. We fall back to the server's
+XAI_API_KEY env var when no header is supplied (handy for local dev and for
+trial users who haven't entered their own key yet).
+"""
+
 import os
 import json
-import anthropic
-from dotenv import load_dotenv
+import re
 from typing import Optional
+
+from openai import OpenAI
+from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Per-request key resolution ─────────────────────────────────────────
-# The frontend now sends each user's Anthropic key via the X-Anthropic-Key
-# header. Endpoints in main.py extract that and pass it down as `api_key`
-# to the functions in this module. We fall back to the server-side env
-# var (ANTHROPIC_API_KEY) if no header is supplied (handy for local dev).
-DEFAULT_KEY = os.getenv("ANTHROPIC_API_KEY")
+# Server-side fallback key. Used when:
+#   - The frontend doesn't send X-XAI-Key (local dev)
+#   - The user is on a free trial and has no key of their own
+DEFAULT_KEY = os.getenv("XAI_API_KEY")
 
-MODEL = "claude-3-5-sonnet-20240620"
+XAI_BASE_URL = "https://api.x.ai/v1"
+MODEL = os.getenv("XAI_MODEL", "grok-2-latest")
 
 
-def _client(api_key: Optional[str] = None) -> anthropic.Anthropic:
-    """Build an Anthropic client using the user-supplied key (preferred)
-    or the server's default key as a fallback."""
+def _client(api_key: Optional[str] = None) -> OpenAI:
+    """Build an xAI client (via OpenAI SDK) using the user-supplied key first,
+    falling back to the server's default key."""
     key = api_key or DEFAULT_KEY
     if not key:
         raise RuntimeError(
-            "No Anthropic API key supplied. Either set ANTHROPIC_API_KEY on "
-            "the server or pass an X-Anthropic-Key header from the client."
+            "No xAI API key supplied. Either set XAI_API_KEY on the server "
+            "or pass an X-XAI-Key header from the client."
         )
-    return anthropic.Anthropic(api_key=key)
+    return OpenAI(api_key=key, base_url=XAI_BASE_URL)
+
+
+def _extract_json(text: str) -> dict:
+    """xAI sometimes wraps JSON in ```json fences or prose. Strip and parse."""
+    text = text.strip()
+    # Strip code fences
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    # Find the first {...} JSON object if there's surrounding prose
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
+        text = m.group(0)
+    return json.loads(text)
+
+
+def _chat(prompt: str, system: Optional[str] = None, api_key: Optional[str] = None,
+          max_tokens: int = 1024) -> str:
+    """One-shot non-streaming chat completion. Returns the assistant text."""
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    resp = _client(api_key).chat.completions.create(
+        model=MODEL,
+        messages=messages,
+        max_tokens=max_tokens,
+    )
+    return resp.choices[0].message.content or ""
 
 
 def get_receptivity_score(customer_profile: dict, api_key: Optional[str] = None):
@@ -45,16 +85,12 @@ def get_receptivity_score(customer_profile: dict, api_key: Optional[str] = None)
         "rationale": "string"
     }}
     """
-
-    message = _client(api_key).messages.create(
-        model=MODEL,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return json.loads(message.content[0].text)
+    text = _chat(prompt, api_key=api_key)
+    return _extract_json(text)
 
 
-def get_sentiment_score(message_text: str, history: list, customer_profile: dict = None, api_key: Optional[str] = None):
+def get_sentiment_score(message_text: str, history: list, customer_profile: dict = None,
+                        api_key: Optional[str] = None):
     profile_blob = (
         json.dumps(customer_profile)
         if customer_profile
@@ -67,16 +103,14 @@ def get_sentiment_score(message_text: str, history: list, customer_profile: dict
 
     The customer just said: '{message_text}'
 
-    Return JSON only, no other text: {{sentiment: <number from -1.0 to 1.0>, tone: <one of: Frustrated|Tense|Neutral|Explaining|Relieved|Warm|Grateful>}}
+    Return JSON only, no other text: {{"sentiment": <number from -1.0 to 1.0>, "tone": <one of: Frustrated|Tense|Neutral|Explaining|Relieved|Warm|Grateful>}}
     """
-
-    message = _client(api_key).messages.create(
-        model=MODEL,
-        max_tokens=1024,
+    text = _chat(
+        prompt,
         system="You are a real-time sentiment analyzer for a telecom support call. Return only a JSON object, nothing else.",
-        messages=[{"role": "user", "content": prompt}],
+        api_key=api_key,
     )
-    return json.loads(message.content[0].text)
+    return _extract_json(text)
 
 
 def detect_pivot(transcript: list, customer_profile: dict = None, api_key: Optional[str] = None):
@@ -103,14 +137,12 @@ def detect_pivot(transcript: list, customer_profile: dict = None, api_key: Optio
       "monthly_price": "$69/mo"
     }}
     """
-
-    message = _client(api_key).messages.create(
-        model=MODEL,
-        max_tokens=1024,
+    text = _chat(
+        prompt,
         system="You are monitoring a live telecom support call to detect the optimal moment to suggest a service upgrade. Be precise. Do not trigger early.",
-        messages=[{"role": "user", "content": prompt}],
+        api_key=api_key,
     )
-    return json.loads(message.content[0].text)
+    return _extract_json(text)
 
 
 def analyze_call(transcript: list, api_key: Optional[str] = None):
@@ -139,10 +171,5 @@ def analyze_call(transcript: list, api_key: Optional[str] = None):
         "sales_duration_lines": int
     }}
     """
-
-    message = _client(api_key).messages.create(
-        model=MODEL,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return json.loads(message.content[0].text)
+    text = _chat(prompt, api_key=api_key, max_tokens=2048)
+    return _extract_json(text)

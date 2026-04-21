@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { useKeys, KeyName } from '../lib/keys';
+import { activateTrial, useTrial } from '../lib/trial';
+import { SUPABASE_MODE } from '../lib/supabase';
 import {
   Sparkles, Mic, Brain, Phone, ArrowRight, Eye, EyeOff,
-  CheckCircle2, XCircle, Loader2, ExternalLink, Rocket,
+  CheckCircle2, XCircle, Loader2, ExternalLink, Rocket, Zap,
 } from 'lucide-react';
 
 interface KeyStepConfig {
@@ -40,14 +42,14 @@ const STEPS: KeyStepConfig[] = [
     description: 'Deepgram transcribes the call live so Aria can react sentence-by-sentence.',
   },
   {
-    name: 'anthropic',
-    title: 'Connect Anthropic',
+    name: 'xai',
+    title: 'Connect xAI Grok',
     subtitle: 'Sentiment + Gratitude Window Detection',
-    placeholder: 'sk-ant-…',
-    helpUrl: 'https://console.anthropic.com/settings/keys',
-    helpLabel: 'Anthropic console → API Keys',
+    placeholder: 'xai-…',
+    helpUrl: 'https://console.x.ai/',
+    helpLabel: 'xAI console → API Keys',
     icon: <Brain size={18} />,
-    description: 'Claude scores sentiment line-by-line and detects the Gratitude Window: the exact moment to pivot from support to sales.',
+    description: 'Grok scores sentiment line-by-line and detects the Gratitude Window: the exact moment to pivot from support to sales.',
   },
 ];
 
@@ -55,13 +57,16 @@ export default function Onboarding() {
   const navigate = useNavigate();
   const { user, markOnboarded } = useAuth();
   const { keys, setKey, validateKey } = useKeys();
+  const { status: trial, refresh: refreshTrial } = useTrial();
+  const [trialBusy, setTrialBusy] = useState(false);
+  const [trialErr, setTrialErr] = useState<string | null>(null);
   const [step, setStep] = useState(0); // 0 = welcome, 1..3 = keys, 4 = complete
-  const [reveal, setReveal] = useState<Record<KeyName, boolean>>({ vapi: false, deepgram: false, anthropic: false });
+  const [reveal, setReveal] = useState<Record<KeyName, boolean>>({ vapi: false, deepgram: false, xai: false });
   const [validation, setValidation] = useState<Record<KeyName, { state: 'idle' | 'checking' | 'ok' | 'fail'; msg?: string }>>({
-    vapi: { state: 'idle' }, deepgram: { state: 'idle' }, anthropic: { state: 'idle' },
+    vapi: { state: 'idle' }, deepgram: { state: 'idle' }, xai: { state: 'idle' },
   });
   const [draft, setDraft] = useState<Record<KeyName, string>>({
-    vapi: keys.vapi, deepgram: keys.deepgram, anthropic: keys.anthropic,
+    vapi: keys.vapi, deepgram: keys.deepgram, xai: keys.xai,
   });
 
   const totalSteps = STEPS.length + 2; // welcome + 3 keys + complete
@@ -81,6 +86,25 @@ export default function Onboarding() {
     await markOnboarded();
     navigate('/dashboard', { replace: true });
   };
+
+  const startTrial = async () => {
+    setTrialErr(null);
+    setTrialBusy(true);
+    try {
+      await activateTrial();
+      await markOnboarded();
+      await refreshTrial();
+      navigate('/live-call', { replace: true });
+    } catch (e: any) {
+      setTrialErr(e?.message || 'Could not start trial.');
+    } finally {
+      setTrialBusy(false);
+    }
+  };
+
+  const trialAvailable = SUPABASE_MODE === 'cloud';
+  const trialLimitDisplay = trial.limit > 0 ? trial.limit : 3;
+  const trialRemainingDisplay = trial.limit > 0 ? trial.remaining : 3;
 
   // ─────────────────────────────────────────────────────────────
   // Render the appropriate step
@@ -106,11 +130,42 @@ export default function Onboarding() {
             </div>
             <h1 className="wizard-title">Let's activate your workspace</h1>
             <p className="wizard-sub">
-              ShiftCall needs three API keys to bring Aria to life. They're stored only in your browser
-              and are never sent to ShiftCall servers.
+              Try ShiftCall with {trialLimitDisplay} free calls on us, or bring your own API keys for unlimited usage.
+              Either way, your keys stay in your browser and never touch our servers.
             </p>
 
-            <div className="space-y-2.5 mt-6">
+            {trialAvailable && trialRemainingDisplay > 0 && (
+              <div className="trial-hero">
+                <div className="trial-hero-row">
+                  <div className="trial-hero-icon"><Zap size={18} /></div>
+                  <div className="trial-hero-text">
+                    <div className="trial-hero-title">
+                      Try {trialRemainingDisplay} free call{trialRemainingDisplay === 1 ? '' : 's'}, no keys required
+                    </div>
+                    <div className="trial-hero-sub">
+                      We use our shared keys for your first {trialLimitDisplay} calls. Add your own anytime to keep going.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={startTrial}
+                  disabled={trialBusy}
+                  className="btn-block btn-block-primary"
+                  style={{ marginTop: 14 }}
+                >
+                  {trialBusy
+                    ? <><Loader2 size={16} className="animate-spin" /> Starting your trial…</>
+                    : <>Start {trialRemainingDisplay} free call{trialRemainingDisplay === 1 ? '' : 's'} <ArrowRight size={16} /></>}
+                </button>
+                {trialErr && <p className="field-error" style={{ marginTop: 8 }}>{trialErr}</p>}
+              </div>
+            )}
+
+            <div className="trial-divider">
+              <span>or bring your own keys</span>
+            </div>
+
+            <div className="space-y-2.5">
               {STEPS.map((s, i) => (
                 <div key={s.name} className="key-card">
                   <div className="key-card-row">

@@ -343,7 +343,7 @@ function AnalyticsDashboard() {
               </p>
             </div>
             <div className="flex gap-2">
-              <span className="tag tag-mute"><Activity size={10} /> Live model: claude-3.5-sonnet</span>
+              <span className="tag tag-mute"><Activity size={10} /> Live model: grok-2-latest</span>
             </div>
           </div>
 

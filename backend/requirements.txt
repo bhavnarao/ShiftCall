@@ -1,9 +1,9 @@
 fastapi
 uvicorn
-anthropic
-pinecone
 openai
+pinecone
 mistralai
 python-dotenv
 pydantic
 websockets
+httpx

@@ -1,15 +1,15 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useAuth } from './auth';
 
-export type KeyName = 'vapi' | 'deepgram' | 'anthropic';
+export type KeyName = 'vapi' | 'deepgram' | 'xai';
 
 export interface ApiKeys {
   vapi: string;
   deepgram: string;
-  anthropic: string;
+  xai: string;
 }
 
-const EMPTY: ApiKeys = { vapi: '', deepgram: '', anthropic: '' };
+const EMPTY: ApiKeys = { vapi: '', deepgram: '', xai: '' };
 
 function storageKeyFor(userId: string) {
   return `shiftcall.keys.${userId}`;
@@ -32,18 +32,27 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [keys, setKeysState] = useState<ApiKeys>(EMPTY);
 
-  // Load from localStorage when the user changes
+  // Load from localStorage when the user changes. We migrate any legacy
+  // `anthropic` key into the new `xai` slot once and then forget about it
+  // (xAI keys are different so they'll likely revalidate, but this keeps
+  // existing users from losing their entry on first load after the swap).
   useEffect(() => {
     if (!user) { setKeysState(EMPTY); return; }
     try {
       const raw = localStorage.getItem(storageKeyFor(user.id));
-      setKeysState(raw ? { ...EMPTY, ...JSON.parse(raw) } : EMPTY);
+      if (!raw) { setKeysState(EMPTY); return; }
+      const parsed = JSON.parse(raw) as Partial<ApiKeys & { anthropic?: string }>;
+      const next: ApiKeys = {
+        vapi: parsed.vapi || '',
+        deepgram: parsed.deepgram || '',
+        xai: parsed.xai || '',
+      };
+      setKeysState(next);
     } catch {
       setKeysState(EMPTY);
     }
   }, [user?.id]);
 
-  // Persist on every change
   const persist = useCallback((next: ApiKeys) => {
     if (!user) return;
     localStorage.setItem(storageKeyFor(user.id), JSON.stringify(next));
@@ -68,7 +77,7 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
     setKeysState(EMPTY);
   }, [user?.id]);
 
-  const missing = (['vapi', 'deepgram', 'anthropic'] as KeyName[]).filter((k) => !keys[k]);
+  const missing = (['vapi', 'deepgram', 'xai'] as KeyName[]).filter((k) => !keys[k]);
   const hasAllRequired = missing.length === 0;
 
   const validateKey: KeysCtx['validateKey'] = useCallback(async (name, value) => {
@@ -76,18 +85,15 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
     if (!v) return { ok: false, message: 'Key is empty' };
 
     try {
-      if (name === 'anthropic') {
-        // Anthropic: a cheap models list call
-        const r = await fetch('https://api.anthropic.com/v1/models', {
+      if (name === 'xai') {
+        // xAI is OpenAI-compatible. /v1/models is a cheap auth check.
+        const r = await fetch('https://api.x.ai/v1/models', {
           method: 'GET',
-          headers: {
-            'x-api-key': v,
-            'anthropic-version': '2023-06-01',
-          },
+          headers: { Authorization: `Bearer ${v}` },
         });
-        if (r.ok) return { ok: true, message: 'Anthropic key verified.' };
-        if (r.status === 401 || r.status === 403) return { ok: false, message: 'Invalid Anthropic key.' };
-        return { ok: false, message: `Anthropic responded with HTTP ${r.status}.` };
+        if (r.ok) return { ok: true, message: 'xAI Grok key verified.' };
+        if (r.status === 401 || r.status === 403) return { ok: false, message: 'Invalid xAI key.' };
+        return { ok: false, message: `xAI responded with HTTP ${r.status}.` };
       }
 
       if (name === 'deepgram') {
@@ -101,9 +107,8 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (name === 'vapi') {
-        // Vapi *public* keys are client-safe and used to start a web call,
-        // but Vapi has no public-key /me endpoint. We do a structural check
-        // (UUID-like) and trust the runtime call to surface real errors.
+        // Vapi public keys are client-safe and used to start a web call,
+        // but Vapi has no public-key /me endpoint. Structural UUID check.
         const looksOk = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(v);
         return looksOk
           ? { ok: true, message: 'Vapi public key format looks valid (real check happens at call start).' }

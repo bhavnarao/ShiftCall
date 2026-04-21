@@ -12,6 +12,7 @@ import Vapi from '@vapi-ai/web';
 import { createClient } from "@deepgram/sdk";
 import { useKeys } from '../lib/keys';
 import { useCalls } from '../lib/calls';
+import { useTrial, fetchTrialKeys, consumeTrialCall } from '../lib/trial';
 import {
   Persona, IssuePreset, PRESET_PERSONAS, ISSUE_PRESETS,
   buildSystemPrompt, firstMessageFor,
@@ -123,9 +124,20 @@ const LiveCallSimulator = () => {
   // ── Per-user keys (from localStorage; entered during onboarding) ──
   const { keys, hasAllRequired, missing } = useKeys();
   const { insertCall } = useCalls();
-  const VAPI_PUBLIC_KEY  = keys.vapi  || import.meta.env.VITE_VAPI_PUBLIC_KEY  || "";
-  const DEEPGRAM_API_KEY = keys.deepgram || import.meta.env.VITE_DEEPGRAM_API_KEY || "";
-  const isConfigured = hasAllRequired || (VAPI_PUBLIC_KEY && DEEPGRAM_API_KEY && keys.anthropic);
+  const { status: trial, refresh: refreshTrial } = useTrial();
+  const ENV_VAPI_KEY = import.meta.env.VITE_VAPI_PUBLIC_KEY || "";
+  const ENV_DG_KEY   = import.meta.env.VITE_DEEPGRAM_API_KEY || "";
+  // Two paths qualify the user to start a call:
+  //   1. They've added their own keys (full BYO).
+  //   2. They're on a free trial with calls remaining (we'll fetch trial
+  //      keys from the backend right before the call).
+  const hasOwnKeys = hasAllRequired || (keys.vapi && keys.deepgram && keys.xai);
+  const hasEnvKeys = !!(ENV_VAPI_KEY && ENV_DG_KEY);
+  const trialAvailable = trial.trialActive && trial.remaining > 0;
+  const isConfigured = hasOwnKeys || hasEnvKeys || trialAvailable;
+  // Track the keys actually used for the in-flight call so we know whether
+  // to decrement the trial counter when it ends.
+  const trialUsedThisCallRef = useRef(false);
 
   // ── Derived ───────────────────────────────────────────────────────
   const allConditionsMet =
@@ -169,11 +181,40 @@ const LiveCallSimulator = () => {
   }, [allConditionsMet, callStatus]);
 
   // startCall: accepts the persona + issue selected in the setup modal.
+  // Resolves API keys in priority order:
+  //   1. User's own keys (entered in Onboarding/Settings)
+  //   2. Build-time VITE_* env keys (local-dev escape hatch)
+  //   3. Free-trial keys minted by the backend
   const startCall = async (persona: Persona = activePersona, issue: IssuePreset = activeIssue) => {
-    if (!isConfigured) {
-      setError("API Configuration Required: set VITE_VAPI_PUBLIC_KEY and VITE_DEEPGRAM_API_KEY in frontend/.env");
-      return;
+    // Decide which keys to use up-front so the rest of the function reads them
+    // from locals instead of reactive state.
+    let vapiKey = keys.vapi || ENV_VAPI_KEY;
+    let dgKey   = keys.deepgram || ENV_DG_KEY;
+    let usedTrial = false;
+
+    if (!vapiKey || !dgKey) {
+      // Need to fall back to the trial path
+      if (!trialAvailable) {
+        setError("API keys are not configured. Open Settings to add your Vapi, Deepgram, and xAI keys, or activate the free trial from Onboarding.");
+        return;
+      }
+      try {
+        setCallStatus("connecting");
+        setError(null);
+        const tk = await fetchTrialKeys();
+        vapiKey = tk.vapiPublicKey;
+        dgKey = tk.deepgramToken;
+        usedTrial = true;
+      } catch (e: any) {
+        const msg = e?.message === 'TRIAL_EXHAUSTED'
+          ? "You've used all your free trial calls. Add your own API keys in Settings to keep going."
+          : `Could not start trial call: ${e?.message || 'unknown error'}`;
+        setError(msg);
+        setCallStatus("idle");
+        return;
+      }
     }
+    trialUsedThisCallRef.current = usedTrial;
     setActivePersona(persona);
     setActiveIssue(issue);
     try {
@@ -226,7 +267,7 @@ const LiveCallSimulator = () => {
       }, 15000);
 
       console.log("[ShiftCall] Initializing Deepgram...");
-      const deepgram = createClient(DEEPGRAM_API_KEY);
+      const deepgram = createClient(dgKey);
       const dgSocket = deepgram.listen.live({
         model: "nova-2", language: "en-US", smart_format: true,
         interim_results: true, diarize: true, endpointing: 300, punctuate: true,
@@ -250,7 +291,7 @@ const LiveCallSimulator = () => {
       });
 
       console.log("[ShiftCall] Initializing Vapi...");
-      const vapi = new Vapi(VAPI_PUBLIC_KEY);
+      const vapi = new Vapi(vapiKey);
       vapiRef.current = vapi;
 
       vapi.on('call-start', () => {
@@ -452,8 +493,8 @@ const LiveCallSimulator = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // Pass the user's Anthropic key so the backend can use it per request
-          ...(keys.anthropic ? { 'X-Anthropic-Key': keys.anthropic } : {}),
+          // Pass the user's xAI key so the backend can use it per request
+          ...(keys.xai ? { 'X-XAI-Key': keys.xai } : {}),
         },
         body: JSON.stringify({ transcript: lines })
       });
@@ -506,6 +547,18 @@ const LiveCallSimulator = () => {
       });
     } catch (e) {
       console.error('Failed to persist call:', e);
+    }
+
+    // ─── Decrement trial counter if this was a free-trial call ────
+    if (trialUsedThisCallRef.current) {
+      try {
+        await consumeTrialCall();
+        await refreshTrial();
+      } catch (e) {
+        console.error('Failed to decrement trial counter:', e);
+      } finally {
+        trialUsedThisCallRef.current = false;
+      }
     }
   };
 
