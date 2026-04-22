@@ -11,6 +11,7 @@ import { AuthProvider, useAuth } from './lib/auth';
 import { ApiKeysProvider, useKeys } from './lib/keys';
 import { ProtectedRoute, PublicOnlyRoute } from './components/ProtectedRoute';
 import { UserMenu } from './components/UserMenu';
+import { Logo, LogoMark } from './components/Logo';
 import { AlertTriangle } from 'lucide-react';
 
 // ── Top nav for authenticated app ─────────────────────────────────────
@@ -30,19 +31,8 @@ function AppShell() {
         }}
       >
         <div className="flex items-center gap-10">
-          <Link to="/dashboard" className="flex items-center gap-2">
-            <div
-              className="w-6 h-6 rounded-lg flex items-center justify-center"
-              style={{
-                background: 'linear-gradient(135deg, #2DD4BF 0%, #818CF8 100%)',
-                boxShadow: '0 0 14px rgba(45,212,191,0.35)',
-              }}
-            >
-              <span className="text-[10px] font-bold text-background">S</span>
-            </div>
-            <h1 className="text-[15px] font-semibold tracking-tight text-textMain" style={{ letterSpacing: '-0.01em' }}>
-              ShiftCall
-            </h1>
+          <Link to="/dashboard" aria-label="ShiftCall home">
+            <Logo size={20} className="text-textMain" />
           </Link>
 
           <nav className="flex items-center gap-1 text-[13px]">
@@ -120,15 +110,9 @@ function RootRedirect() {
 
 function BootSplash() {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background text-textMain">
-      <div
-        className="w-10 h-10 rounded-2xl flex items-center justify-center"
-        style={{
-          background: 'linear-gradient(135deg, #2DD4BF 0%, #818CF8 100%)',
-          boxShadow: '0 0 24px rgba(45,212,191,0.45)',
-        }}
-      >
-        <span className="text-sm font-bold text-background">S</span>
+    <div className="min-h-screen flex flex-col items-center justify-center gap-5 bg-background text-textMain">
+      <div className="boot-splash-mark">
+        <LogoMark size={44} accent />
       </div>
       <div className="flex items-center gap-2 text-[13px] text-textMuted">
         <span className="w-1.5 h-1.5 rounded-full bg-textMuted animate-pulse" />

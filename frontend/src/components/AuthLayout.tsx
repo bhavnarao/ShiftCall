@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAuth } from '../lib/auth';
 import { Info } from 'lucide-react';
+import { Logo } from './Logo';
 
 // Only show the demo banner on local dev hosts. In any deployed build (vercel.app,
 // custom domain, etc.) we keep the UI clean so visitors never see dev-flavored
@@ -19,8 +20,7 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
     <div className="auth-shell">
       <div className="auth-card">
         <div className="auth-logo">
-          <div className="auth-logo-mark">S</div>
-          <div className="auth-logo-text">ShiftCall</div>
+          <Logo size={26} accent />
         </div>
 
         {showDemoBanner && (

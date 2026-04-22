@@ -954,20 +954,36 @@
 .auth-logo {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
   margin-bottom: 28px;
 }
-.auth-logo-mark {
-  width: 30px; height: 30px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, #2DD4BF 0%, #818CF8 100%);
-  display: flex; align-items: center; justify-content: center;
-  color: #08080A;
-  font-weight: 700;
-  font-size: 13px;
-  box-shadow: 0 0 18px rgba(45,212,191,0.45);
+
+.boot-splash-mark {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  border-radius: 22px;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(45, 212, 191, 0.10) 0%,
+    rgba(129, 140, 248, 0.06) 45%,
+    rgba(0, 0, 0, 0) 70%
+  );
 }
-.auth-logo-text { font-size: 16px; font-weight: 600; color: #F5F5F7; letter-spacing: -0.015em; }
+.boot-splash-mark::after {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  border-radius: 28px;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(45, 212, 191, 0.18) 0%,
+    rgba(0, 0, 0, 0) 60%
+  );
+  z-index: -1;
+  filter: blur(8px);
+}
 
 .auth-title {
   font-size: 28px;
