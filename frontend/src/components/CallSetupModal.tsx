@@ -200,7 +200,7 @@ const CallSetupModal: React.FC<Props> = ({ open, onCancel, onConfirm }) => {
               {' '}about {selectedIssue.shortLabel.toLowerCase()}.
             </span>
           </div>
-          <div className="flex gap-3">
+          <div className="footer-actions">
             <button onClick={onCancel} className="btn-block btn-block-ghost call-setup-btn">
               Cancel
             </button>
