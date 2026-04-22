@@ -4,6 +4,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://shiftcall.onrender.com/:path*"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
     }
   ]
 }
