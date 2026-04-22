@@ -81,70 +81,115 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Loads (or creates if missing) the profile row for a Supabase user
-    // and pushes it into local state.
+    // and pushes it into local state. Never throws — on any failure we
+    // fall back to a minimal user object so the UI keeps working.
     const hydrate = async (su: any) => {
-      if (!supabase) return;
-      let { data: p } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', su.id)
-        .maybeSingle();
+      if (!supabase || cancelled) return;
 
-      // Fresh Google OAuth user: no profile row yet. Create one.
-      if (!p) {
-        const fallbackName =
-          (su.user_metadata?.full_name as string) ||
-          (su.user_metadata?.name as string) ||
-          (su.email ? su.email.split('@')[0] : 'My Workspace');
-        const { data: created } = await supabase
+      let workspaceName = 'My Workspace';
+      let onboarded = false;
+
+      try {
+        // Race the profile fetch against a 4s timeout so a slow / hung
+        // request can't pin loading=true forever.
+        const fetchProfile = supabase
           .from('profiles')
-          .upsert({
-            id: su.id,
-            email: su.email,
-            workspace_name: fallbackName,
-            onboarded: false,
-          })
-          .select()
+          .select('*')
+          .eq('id', su.id)
           .maybeSingle();
-        p = created || null;
+
+        const { data: p } = (await Promise.race([
+          fetchProfile,
+          new Promise((resolve) =>
+            setTimeout(() => resolve({ data: null }), 4000),
+          ),
+        ])) as { data: any };
+
+        if (p) {
+          workspaceName = p.workspace_name || workspaceName;
+          onboarded = p.onboarded ?? false;
+        } else {
+          // No profile row yet — common for fresh Google OAuth users.
+          // Create one but don't block the UI on it.
+          const fallbackName =
+            (su.user_metadata?.full_name as string) ||
+            (su.user_metadata?.name as string) ||
+            (su.email ? su.email.split('@')[0] : 'My Workspace');
+          workspaceName = fallbackName;
+          // Fire-and-forget the upsert; we already know we'll show the
+          // user the app immediately.
+          supabase
+            .from('profiles')
+            .upsert({
+              id: su.id,
+              email: su.email,
+              workspace_name: fallbackName,
+              onboarded: false,
+            })
+            .then(() => undefined, (err: unknown) => {
+              console.warn('[auth] profile upsert failed (non-fatal):', err);
+            });
+        }
+      } catch (err) {
+        console.warn('[auth] hydrate failed (non-fatal):', err);
       }
 
       if (cancelled) return;
       setUser({
         id: su.id,
         email: su.email || '',
-        workspaceName: p?.workspace_name || 'My Workspace',
+        workspaceName,
         createdAt: su.created_at,
-        onboarded: p?.onboarded ?? false,
+        onboarded,
       });
+    };
+
+    // Hard safety net: under no circumstance should loading stay true
+    // for more than 6 seconds. If something is genuinely broken, the
+    // user gets dumped to /login instead of staring at a blank screen.
+    const loadingTimeout = setTimeout(() => {
+      if (!cancelled) setLoading(false);
+    }, 6000);
+
+    const finishLoading = () => {
+      clearTimeout(loadingTimeout);
+      if (!cancelled) setLoading(false);
     };
 
     // 1. Register the listener FIRST so we don't miss the SIGNED_IN event.
     const { data: listener } = supabase.auth.onAuthStateChange(async (_evt, session) => {
-      if (!session) {
-        if (!cancelled) {
-          setUser(null);
-          setLoading(false);
+      try {
+        if (!session) {
+          if (!cancelled) setUser(null);
+          return;
         }
-        return;
+        await hydrate(session.user);
+      } catch (err) {
+        console.warn('[auth] onAuthStateChange handler failed:', err);
+      } finally {
+        finishLoading();
       }
-      await hydrate(session.user);
-      if (!cancelled) setLoading(false);
     });
 
     // 2. THEN check for an existing session (covers the page-refresh case
     //    where we already have a session but no auth event fires).
     (async () => {
-      if (!supabase) return;
-      const { data } = await supabase.auth.getSession();
-      if (data.session) {
-        await hydrate(data.session.user);
+      try {
+        if (!supabase) return;
+        const { data } = await supabase.auth.getSession();
+        if (data.session) {
+          await hydrate(data.session.user);
+        }
+      } catch (err) {
+        console.warn('[auth] getSession bootstrap failed:', err);
+      } finally {
+        finishLoading();
       }
-      if (!cancelled) setLoading(false);
     })();
 
     return () => {
       cancelled = true;
+      clearTimeout(loadingTimeout);
       listener?.subscription?.unsubscribe();
     };
   }, []);

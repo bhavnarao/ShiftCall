@@ -114,8 +114,28 @@ function AppShell() {
 // logged-in users to /dashboard. No marketing landing.
 function RootRedirect() {
   const { user, loading } = useAuth();
-  if (loading) return null;
+  if (loading) return <BootSplash />;
   return <Navigate to={user ? '/dashboard' : '/login'} replace />;
+}
+
+function BootSplash() {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background text-textMain">
+      <div
+        className="w-10 h-10 rounded-2xl flex items-center justify-center"
+        style={{
+          background: 'linear-gradient(135deg, #2DD4BF 0%, #818CF8 100%)',
+          boxShadow: '0 0 24px rgba(45,212,191,0.45)',
+        }}
+      >
+        <span className="text-sm font-bold text-background">S</span>
+      </div>
+      <div className="flex items-center gap-2 text-[13px] text-textMuted">
+        <span className="w-1.5 h-1.5 rounded-full bg-textMuted animate-pulse" />
+        <span>Loading workspace…</span>
+      </div>
+    </div>
+  );
 }
 
 function App() {
