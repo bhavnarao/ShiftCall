@@ -23,6 +23,7 @@ interface AnalysisData {
 }
 
 interface RecentCall {
+  id: string;
   customer: string;
   issue: string;
   duration: string;
@@ -82,6 +83,7 @@ const tagFor = (label?: string) =>
 // ── Convert SavedCall (snake_case from DB) → RecentCall (camelCase) ──
 function savedToRecent(c: SavedCall): RecentCall {
   return {
+    id: c.id,
     customer: c.customer,
     issue: c.issue,
     duration: c.duration,
@@ -219,7 +221,7 @@ function AnalyticsDashboard() {
   }, [recentCalls]);
 
   if (selectedCall) {
-    return <PostCallView callEntry={selectedCall} onBack={() => setSelectedCall(null)} />;
+    return <PostCallView callEntry={selectedCall} onBack={() => setSelectedCall(null)} onOutcomeChange={(o) => setSelectedCall((s) => s ? { ...s, outcome: o, revenueAdded: o === 'converted' ? (s.revenueAdded && s.revenueAdded !== '$0' ? s.revenueAdded : '+$30/mo') : '$0' } : s)} />;
   }
 
   // ── Loading / empty states ─────────────────────────────────────────
@@ -679,10 +681,12 @@ function IntentTile({
 }
 
 // ── Post-Call View (drill-in) ──────────────────────────────────────────
-function PostCallView({ state, callEntry, onBack }: { state?: any; callEntry?: RecentCall; onBack?: () => void }) {
+function PostCallView({ state, callEntry, onBack, onOutcomeChange }: { state?: any; callEntry?: RecentCall; onBack?: () => void; onOutcomeChange?: (outcome: 'converted' | 'missed') => void }) {
   const navigate = useNavigate();
+  const { updateCall } = useCalls();
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
   const [loading] = useState(false);
+  const [savingOutcome, setSavingOutcome] = useState(false);
 
   const isMock = !!callEntry;
 
@@ -690,6 +694,20 @@ function PostCallView({ state, callEntry, onBack }: { state?: any; callEntry?: R
   const [isConverted, setIsConverted] = useState(initialConverted);
 
   useEffect(() => { setIsConverted(initialConverted); }, [initialConverted]);
+
+  const toggleOutcome = async () => {
+    const next = !isConverted;
+    setIsConverted(next);
+    onOutcomeChange?.(next ? 'converted' : 'missed');
+    if (callEntry?.id) {
+      setSavingOutcome(true);
+      await updateCall(callEntry.id, {
+        outcome: next ? 'converted' : 'missed',
+        revenue_added: next ? '+$30/mo' : '$0',
+      });
+      setSavingOutcome(false);
+    }
+  };
 
   const fmt = (s: number) => `${Math.floor(s / 60)}m ${(s % 60).toString().padStart(2, '0')}s`;
 
@@ -776,10 +794,11 @@ function PostCallView({ state, callEntry, onBack }: { state?: any; callEntry?: R
             </div>
           </div>
           <button
-            onClick={() => setIsConverted(!isConverted)}
+            onClick={toggleOutcome}
+            disabled={savingOutcome}
             className={`btn-pill ${isConverted ? '' : 'btn-primary-pill'}`}
           >
-            {isConverted ? 'Mark as lost' : 'Mark as converted'}
+            {savingOutcome ? 'Saving…' : (isConverted ? 'Mark as lost' : 'Mark as converted')}
           </button>
         </div>
 

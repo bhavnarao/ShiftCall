@@ -114,6 +114,11 @@ const LiveCallSimulator = () => {
   const dgSocketRef = useRef<any>(null);
   const timerRef = useRef<any>(null);
   const pivotTriggeredRef = useRef(false);
+  const liveConvertedRef = useRef(false);
+  // Set true once the agent has mentioned the upgrade in any form.
+  // Used as a soft gate so a generic customer "ok" early in the call doesn't
+  // get misread as upgrade acceptance.
+  const upgradeOfferedRef = useRef(false);
   const conditionSentimentHighRef = useRef(false);
   const conditionIssueResolvedRef = useRef(false);
   const conditionGratitudeRef = useRef(false);
@@ -226,6 +231,8 @@ const LiveCallSimulator = () => {
       setCallMode("support");
       setShowPivotNotification(false);
       pivotTriggeredRef.current = false;
+      liveConvertedRef.current = false;
+      upgradeOfferedRef.current = false;
       // Reset intelligence state
       setCurrentSentimentScore(0);
       setThresholdCrossedIdx(null);
@@ -391,20 +398,61 @@ const LiveCallSimulator = () => {
           }
         }
 
-        // Agent resolution detection
-        if (speaker === 'Agent' && !conditionIssueResolvedRef.current) {
-          if (RESOLUTION_KEYWORDS.some(k => lower.includes(k)) ||
+        // Agent resolution detection + upgrade-offer detection
+        if (speaker === 'Agent') {
+          if (!conditionIssueResolvedRef.current && (
+            RESOLUTION_KEYWORDS.some(k => lower.includes(k)) ||
             (lower.includes('check') && lower.includes('connection')) ||
-            (lower.includes('should') && lower.includes('work'))) {
+            (lower.includes('should') && lower.includes('work'))
+          )) {
             conditionIssueResolvedRef.current = true;
             setConditionIssueResolved(true);
           }
+          // Soft gate for live conversion detection: track whether the agent
+          // has actually mentioned the upgrade. Without this, generic customer
+          // acks like "ok" would falsely flip the call to converted.
+          if (!upgradeOfferedRef.current && (
+            lower.includes('fiber pro') ||
+            lower.includes('upgrade') ||
+            lower.includes('$69') ||
+            lower.includes('69/mo') ||
+            lower.includes('new plan') ||
+            (lower.includes('plan') && lower.includes('faster')) ||
+            (lower.includes('plan') && lower.includes('better'))
+          )) {
+            upgradeOfferedRef.current = true;
+            console.log('[ShiftCall] Upgrade offer detected from agent:', text);
+          }
         }
 
-        // Customer interest in upgrade (post-switch)
-        if (speaker === 'Customer' && pivotTriggeredRef.current) {
-          const upgradeKw = ['yes', 'sure', 'sounds good', 'tell me more', 'how much', 'interested', "let's do it", 'sign me up'];
-          if (upgradeKw.some(k => lower.includes(k))) setIsConverted(true);
+        // Customer agreement / conversion intent.
+        // We deliberately do NOT gate this on pivotTriggeredRef — the customer
+        // can agree at any point in the call (sometimes they jump ahead before
+        // the formal pivot conditions are met). We DO gate on upgradeOfferedRef
+        // so a generic "ok" before any offer doesn't count. The post-call
+        // analyzer will OR-merge so an implicit agreement the keyword list
+        // misses is still caught.
+        if (speaker === 'Customer') {
+          const upgradeKw = [
+            'yes', 'yeah', 'yep', 'yup', 'sure', 'okay', 'ok', 'alright',
+            'sounds good', 'sounds great', 'sounds nice',
+            'tell me more', 'how much', 'interested',
+            "let's do it", 'lets do it', "let's go", 'lets go',
+            'sign me up', 'go ahead', 'do it',
+            'i want', "i'll take", 'ill take', 'take it', 'take the',
+            "i'm in", 'im in', 'count me in',
+            "let's try", 'lets try', "i'll try", 'ill try',
+            'deal', 'works for me', 'sounds fair', 'fine by me',
+            'upgrade me', 'switch me', 'subscribe me',
+          ];
+          const isNegated = /\b(no|nope|not|nah|don't|dont|can't|cant|won't|wont)\b.*?\b(yes|sure|interested|want|take|upgrade)\b/.test(lower);
+          const matched = upgradeKw.find(k => lower.includes(k));
+          console.log('[ShiftCall] Customer line:', { text, lower, upgradeOffered: upgradeOfferedRef.current, matched, isNegated });
+          if (upgradeOfferedRef.current && matched && !isNegated) {
+            setIsConverted(true);
+            liveConvertedRef.current = true;
+            console.log('[ShiftCall] >>> CONVERTED triggered by:', matched);
+          }
         }
 
         if (speaker === 'Customer') triggerSentimentAndPivot(text, newLines);
@@ -486,14 +534,17 @@ const LiveCallSimulator = () => {
     setSummaryLoading(true);
 
     let summary: any = null;
-    let converted = false;
+    // Seed with whatever live detection caught — backend can promote false→true
+    // but never demote true→false. The live keyword detector is the source of
+    // truth for explicit customer agreement; the backend is a safety net for
+    // implicit agreements the keyword list might miss.
+    let converted = liveConvertedRef.current;
 
     try {
       const response = await fetch('/api/analyze-call', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // Pass the user's xAI key so the backend can use it per request
           ...(keys.xai ? { 'X-XAI-Key': keys.xai } : {}),
         },
         body: JSON.stringify({ transcript: lines })
@@ -501,10 +552,12 @@ const LiveCallSimulator = () => {
       const data = await response.json();
       summary = data.summary || data.analysis || null;
       setCallSummary(summary);
-      if (data.converted !== undefined) {
-        converted = data.converted;
-        setIsConverted(converted);
+      console.log('[ShiftCall] analyze-call returned:', { backendConverted: data.converted, liveConverted: liveConvertedRef.current });
+      if (data.converted === true) {
+        converted = true;
       }
+      console.log('[ShiftCall] Final converted decision:', converted);
+      setIsConverted(converted);
     } catch {
       setCallSummary(null);
     } finally {

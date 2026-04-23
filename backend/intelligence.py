@@ -152,13 +152,26 @@ def analyze_call(transcript: list, api_key: Optional[str] = None):
 
     The AI agent (Aria) starts in SUPPORT MODE and switches to SALES MODE when the customer's issue is resolved and sentiment is positive.
 
+    DEFINITION OF CONVERSION (be permissive, optimize for recall):
+    A "conversion" means the CUSTOMER expressed any of the following at any point:
+      - Said yes / yeah / sure / okay / alright / fine to an upgrade or new plan
+      - Said they want to take it / try it / sign up / go ahead / do it / are interested
+      - Asked to be upgraded, switched, signed up, billed for it
+      - Said "let's do it" / "count me in" / "I'm in" / "deal" / "works for me" / "sounds good" in the upgrade context
+      - Showed clear intent to accept the upgrade, even if hedged ("yeah I'll try it for a month")
+    NOT a conversion:
+      - "Maybe later" / "I'll think about it" / "Not interested" / silence / topic change
+      - The agent suggesting an upgrade without the customer agreeing
+
+    If the customer's last upgrade-context response could reasonably be read as agreement, set converted=true. When in doubt and there is any explicit affirmation word from the customer in response to an upgrade pitch, set converted=true.
+
     Provide:
     1. A summary of the call focusing on the transition.
-    2. The line index where the 'Mode Switch' occurred.
-    3. The primary reason for the switch.
-    4. Whether a conversion (agreement to upgrade or interest shown) occurred.
-    5. A full sentiment trajectory (list of mock numbers aligned with transcript lines if not provided).
-    6. Duration split: calculate approximately how many exchanges were in Support vs. Sales.
+    2. The line index where the 'Mode Switch' occurred (or -1 if no switch).
+    3. The primary reason for the switch (or why it didn't happen).
+    4. Whether a conversion occurred (per the definition above).
+    5. A full sentiment trajectory (numbers from -1.0 to 1.0 aligned with transcript lines).
+    6. Duration split: how many exchanges were in Support vs. Sales.
 
     Return ONLY a JSON object:
     {{

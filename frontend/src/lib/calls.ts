@@ -87,6 +87,41 @@ export function useCalls() {
     return record;
   }, [user?.id, calls]);
 
+  const updateCall = useCallback(async (id: string, patch: Partial<SavedCall>): Promise<SavedCall | null> => {
+    if (!user) return null;
+
+    if (SUPABASE_MODE === 'cloud' && supabase) {
+      const { data, error } = await supabase
+        .from('calls')
+        .update(patch)
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .select()
+        .single();
+      if (error) {
+        console.error('Failed to update call in Supabase:', error.message);
+        return null;
+      }
+      const saved = data as SavedCall;
+      setCalls((prev) => prev.map((c) => (c.id === id ? saved : c)));
+      return saved;
+    }
+
+    let updated: SavedCall | null = null;
+    setCalls((prev) => {
+      const next = prev.map((c) => {
+        if (c.id !== id) return c;
+        updated = { ...c, ...patch };
+        return updated;
+      });
+      try {
+        localStorage.setItem(STORAGE_KEY(user.id), JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    return updated;
+  }, [user?.id]);
+
   const clearAll = useCallback(async () => {
     if (!user) return;
     if (SUPABASE_MODE === 'cloud' && supabase) {
@@ -97,5 +132,5 @@ export function useCalls() {
     setCalls([]);
   }, [user?.id]);
 
-  return { calls, loading, insertCall, clearAll, refresh: load };
+  return { calls, loading, insertCall, updateCall, clearAll, refresh: load };
 }
